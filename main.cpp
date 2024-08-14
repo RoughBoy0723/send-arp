@@ -4,16 +4,12 @@
 
 using namespace std;
 
-
 #pragma pack(push, 1)
 struct EthArpPacket final {
     EthHdr eth_;
     ArpHdr arp_;
 };
 #pragma pack(pop)
-
-
-
 
 int main(int argc, char* argv[]) {
     map<string, string> IP_MAC;
@@ -112,7 +108,6 @@ int main(int argc, char* argv[]) {
     }
     cout << "----------------------" << endl;
 
-
     pcap_close(handle);
     return 0;
 }
@@ -150,7 +145,6 @@ void formatMacAddress(char* mac) {
             token++;
         }
     }
-
     snprintf(formattedMac, 18, "%s:%s:%s:%s:%s:%s",
              segments[0], segments[1], segments[2],
              segments[3], segments[4], segments[5]);
@@ -251,4 +245,3 @@ void send_attack_ARP(pcap_t* handle, char* my_mac, char* sender_mac , char* targ
         fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res2, pcap_geterr(handle));
     }
 }
-
