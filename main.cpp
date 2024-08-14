@@ -4,6 +4,11 @@
 
 using namespace std;
 
+map <string, string> IP_MAC;
+
+char my_mac[18];
+char my_ip[16];
+
 #pragma pack(push, 1)
 struct EthArpPacket final {
     EthHdr eth_;
@@ -12,9 +17,8 @@ struct EthArpPacket final {
 #pragma pack(pop)
 
 int main(int argc, char* argv[]) {
-    map<string, string> IP_MAC;
 
-    if (argc < 4 ) {
+    if (argc < 4 || (argc % 2 == 1)) {
         usage();
         return -1;
     }
@@ -22,18 +26,14 @@ int main(int argc, char* argv[]) {
     uint8_t inface_mac[6];
     uint8_t interface_ip[4];
 
-    char my_mac[18];
-    char my_ip[16];
+    char sender_mac[18];
+    char sender_ip[15];
+    char target_mac[18];
+    char target_ip[15];
+
     char* dev = argv[1];
 
     get_MAC_IP_Address(dev, inface_mac, interface_ip);
-
-    sprintf(my_mac, "%02x:%02x:%02x:%02x:%02x:%02x",
-            inface_mac[0], inface_mac[1], inface_mac[2],
-            inface_mac[3], inface_mac[4], inface_mac[5]);
-    sprintf(my_ip, "%d.%d.%d.%d",
-            interface_ip[0], interface_ip[1], interface_ip[2], interface_ip[3]);
-
 
     cout << "----my address----" << endl;
     printf("my mac : %s\n",my_mac);
@@ -48,14 +48,6 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    char sender_mac[18];
-    char sender_ip[15];
-    char target_mac[18];
-    char target_ip[15];
-
-    string tmp_ip;
-    string tmp_mac;
-
     for(int i = 0 ; i < cnt ; i++ ){
         strcpy(sender_ip, argv[2+(i*2)]);
         strcpy(target_ip, argv[3+(i*2)]);
@@ -65,23 +57,7 @@ int main(int argc, char* argv[]) {
         cout << "target_ip : " << target_ip << endl;
         cout << "---------------" << endl;
 
-        tmp_ip = sender_ip;
-        if (IP_MAC.count(tmp_ip)) {
-            strcpy(sender_mac,IP_MAC[sender_ip].c_str());
-        }else{
-            get_mac_address(handle, my_mac, my_ip, sender_ip,sender_mac);
-            tmp_mac = sender_mac;
-            IP_MAC.insert({tmp_ip, tmp_mac});
-        }
-
-        tmp_ip = target_ip;
-        if (IP_MAC.count(tmp_ip)) {
-            strcpy(target_mac, IP_MAC[tmp_ip].c_str());
-        }else{
-            get_mac_address(handle, my_mac, my_ip, target_ip,target_mac);
-            tmp_mac = target_mac;
-            IP_MAC.insert({tmp_ip, tmp_mac});
-        }
+        check_IP_get_MAC(handle ,sender_ip, target_ip, sender_mac, target_mac);
 
         formatMacAddress(sender_mac);
         formatMacAddress(target_mac);
@@ -104,7 +80,7 @@ int main(int argc, char* argv[]) {
 
     cout << endl << endl << "------print map-------" << endl;
     for (const auto& pair : IP_MAC) {
-        std::cout << "Key: " << pair.first << ", Value: " << pair.second << std::endl;
+        cout << "IP: " << pair.first << ", MAC: " << pair.second << endl;
     }
     cout << "----------------------" << endl;
 
@@ -178,6 +154,12 @@ void get_MAC_IP_Address(const char *iface, uint8_t *mac, uint8_t *ip) {
     struct sockaddr_in* ipaddr = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_addr);
     memcpy(ip, &ipaddr->sin_addr.s_addr, sizeof(ipaddr->sin_addr.s_addr));
 
+    sprintf(my_mac, "%02x:%02x:%02x:%02x:%02x:%02x",
+            mac[0], mac[1], mac[2],
+            mac[3], mac[4], mac[5]);
+    sprintf(my_ip, "%d.%d.%d.%d",
+            ip[0], ip[1], ip[2], ip[3]);
+
     close(fd);
 }
 
@@ -200,7 +182,6 @@ void get_mac_address(pcap_t *handle,char *my_mac, char*my_ip, char* sender_ip, c
     to_send_packet.arp_.tip_ = htonl(Ip(sender_ip));
 
     int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&to_send_packet), sizeof(EthArpPacket));
-
     if (res != 0) {
         fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
     }
@@ -218,6 +199,8 @@ void get_mac_address(pcap_t *handle,char *my_mac, char*my_ip, char* sender_ip, c
                 ether_ntoa_r((const struct ether_addr*)&reply->eth_.smac_, sender_mac);
                 break;
             }
+        }else{
+            fprintf(stderr, "pcap_next_ex return %d error=%s\n", res, pcap_geterr(handle));
         }
     }
     memcpy(mac,sender_mac,18);
@@ -244,4 +227,29 @@ void send_attack_ARP(pcap_t* handle, char* my_mac, char* sender_mac , char* targ
     if (res2 != 0) {
         fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res2, pcap_geterr(handle));
     }
+}
+
+void check_IP_get_MAC(pcap_t* handle, char* sender_ip, char* target_ip, char* sender_mac, char* target_mac){
+    string tmp_ip;
+    string tmp_mac;
+
+    tmp_ip = sender_ip;
+    if (IP_MAC.count(tmp_ip)) {
+        cout << "" << endl;
+        strcpy(sender_mac,IP_MAC[sender_ip].c_str());
+    }else{
+        get_mac_address(handle, my_mac, my_ip, sender_ip,sender_mac);
+        tmp_mac = sender_mac;
+        IP_MAC.insert({tmp_ip, tmp_mac});
+    }
+
+    tmp_ip = target_ip;
+    if (IP_MAC.count(tmp_ip)) {
+        strcpy(target_mac, IP_MAC[tmp_ip].c_str());
+    }else{
+        get_mac_address(handle, my_mac, my_ip, target_ip,target_mac);
+        tmp_mac = target_mac;
+        IP_MAC.insert({tmp_ip, tmp_mac});
+    }
+
 }
