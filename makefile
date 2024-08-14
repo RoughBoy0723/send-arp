@@ -2,7 +2,6 @@ LDLIBS=-lpcap
 
 all: send-arp
 
-
 main.o: mac.h ip.h ethhdr.h arphdr.h main.cpp
 
 arphdr.o: mac.h ip.h arphdr.h arphdr.cpp
